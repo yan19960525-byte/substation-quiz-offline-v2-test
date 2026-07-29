@@ -66,7 +66,8 @@ type SessionAnswer = {
 
 type Screen = "home" | "quiz" | "result";
 
-const DB_NAME = "local-question-trainer";
+const DB_NAME = "local-question-trainer-v2";
+const LEGACY_DB_NAME = "local-question-trainer";
 const STORE_NAME = "app-state";
 const STATE_KEY = "primary";
 
@@ -155,9 +156,9 @@ const DEFAULT_STATE: PersistedState = {
   settings: DEFAULT_SETTINGS,
 };
 
-function openDatabase(): Promise<IDBDatabase> {
+function openDatabase(databaseName = DB_NAME): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(databaseName, 1);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) {
         request.result.createObjectStore(STORE_NAME);
@@ -168,8 +169,8 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
-async function loadState(): Promise<unknown> {
-  const database = await openDatabase();
+async function readState(databaseName: string): Promise<unknown> {
+  const database = await openDatabase(databaseName);
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readonly");
     const request = transaction.objectStore(STORE_NAME).get(STATE_KEY);
@@ -177,6 +178,12 @@ async function loadState(): Promise<unknown> {
     request.onerror = () => reject(request.error);
     transaction.oncomplete = () => database.close();
   });
+}
+
+async function loadState(): Promise<unknown> {
+  const current = await readState(DB_NAME);
+  if (current) return current;
+  return readState(LEGACY_DB_NAME);
 }
 
 async function saveState(state: PersistedState): Promise<void> {
