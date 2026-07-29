@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
 type QuestionType = "single" | "multiple" | "judgment";
@@ -65,6 +65,7 @@ type SessionAnswer = {
 };
 
 type Screen = "home" | "quiz" | "result";
+type SwipeAnimation = "exit-next" | "exit-previous" | "enter-next" | "enter-previous";
 
 const DB_NAME = "local-question-trainer-v2";
 const LEGACY_DB_NAME = "local-question-trainer";
@@ -416,11 +417,14 @@ export default function Home() {
   const [selected, setSelected] = useState<string[]>([]);
   const [homeTab, setHomeTab] = useState<"study" | "library" | "settings">("study");
   const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const [wrongListOpen, setWrongListOpen] = useState(false);
+  const [swipeAnimation, setSwipeAnimation] = useState<SwipeAnimation | null>(null);
   const [notice, setNotice] = useState("已内置功能示例题库，可直接开始体验。");
   const excelInput = useRef<HTMLInputElement>(null);
   const backupInput = useRef<HTMLInputElement>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const swipeBlockedClick = useRef(false);
+  const swipeTimer = useRef<number | null>(null);
 
   useEffect(() => {
     loadState()
@@ -441,6 +445,12 @@ export default function Home() {
   }, [state, hydrated]);
 
   const activeBank = state.banks.find((bank) => bank.id === state.activeBankId) ?? state.banks[0];
+  const wrongListBank = screen === "quiz"
+    ? state.banks.find((bank) => bank.id === sessionBankId) ?? activeBank
+    : activeBank;
+  const wrongQuestions = wrongListBank
+    ? wrongListBank.questions.filter((question) => wrongListBank.wrongIds.includes(question.id))
+    : [];
   const current = session[questionIndex];
   const currentAnswer = current ? sessionAnswers[current.id] : undefined;
   const answered = Boolean(currentAnswer);
@@ -466,10 +476,14 @@ export default function Home() {
   }, [current]);
 
   useEffect(() => {
-    if (screen !== "quiz" || !currentAnswer?.correct || !state.settings.autoAdvanceCorrect) return;
+    if (screen !== "quiz" || !currentAnswer?.correct || !state.settings.autoAdvanceCorrect || swipeAnimation) return;
     const timer = window.setTimeout(() => moveAfterAnsweredQuestion(), state.settings.autoAdvanceDelay);
     return () => window.clearTimeout(timer);
-  }, [screen, questionIndex, currentAnswer, state.settings.autoAdvanceCorrect, state.settings.autoAdvanceDelay]);
+  }, [screen, questionIndex, currentAnswer, state.settings.autoAdvanceCorrect, state.settings.autoAdvanceDelay, swipeAnimation]);
+
+  useEffect(() => () => {
+    if (swipeTimer.current !== null) window.clearTimeout(swipeTimer.current);
+  }, []);
 
   function patchSettings(patch: Partial<Settings>) {
     setState((previous) => ({ ...previous, settings: { ...previous.settings, ...patch } }));
@@ -487,7 +501,7 @@ export default function Home() {
     if (bank) setNotice(`已选择“${bank.name}”。`);
   }
 
-  function startQuiz(wrongOnly = false) {
+  function startQuiz(wrongOnly = false, firstQuestionId?: string) {
     if (!activeBank) {
       setNotice("请先导入题库。");
       return;
@@ -499,7 +513,12 @@ export default function Home() {
       setNotice(wrongOnly ? "当前题库的错题本是空的。" : "当前题库没有可练习的题目。");
       return;
     }
-    if (state.settings.shuffleQuestions) questions = shuffle(questions);
+    if (firstQuestionId) {
+      const firstQuestion = questions.find((question) => question.id === firstQuestionId);
+      const remaining = questions.filter((question) => question.id !== firstQuestionId);
+      if (state.settings.shuffleQuestions) questions = firstQuestion ? [firstQuestion, ...shuffle(remaining)] : shuffle(questions);
+      else if (firstQuestion) questions = [firstQuestion, ...remaining];
+    } else if (state.settings.shuffleQuestions) questions = shuffle(questions);
     questions = questions.map((question) => ({
       ...question,
       options:
@@ -513,6 +532,8 @@ export default function Home() {
     setQuestionIndex(0);
     setSelected([]);
     setNavigatorOpen(false);
+    setWrongListOpen(false);
+    setSwipeAnimation(null);
     setScreen("quiz");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -563,7 +584,22 @@ export default function Home() {
     setQuestionIndex(index);
     setSelected(sessionAnswers[target.id]?.selected ?? []);
     setNavigatorOpen(false);
+    setWrongListOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function animateSwipeTo(index: number, direction: "next" | "previous") {
+    if (index < 0 || index >= session.length || swipeAnimation) return;
+    setSwipeAnimation(direction === "next" ? "exit-next" : "exit-previous");
+    if (swipeTimer.current !== null) window.clearTimeout(swipeTimer.current);
+    swipeTimer.current = window.setTimeout(() => {
+      goToQuestion(index);
+      setSwipeAnimation(direction === "next" ? "enter-next" : "enter-previous");
+      swipeTimer.current = window.setTimeout(() => {
+        setSwipeAnimation(null);
+        swipeTimer.current = null;
+      }, 210);
+    }, 150);
   }
 
   function moveAfterAnsweredQuestion() {
@@ -581,6 +617,7 @@ export default function Home() {
   }
 
   function onPointerDown(event: PointerEvent<HTMLElement>) {
+    if (navigatorOpen || wrongListOpen || swipeAnimation) return;
     touchStart.current = { x: event.clientX, y: event.clientY };
     swipeBlockedClick.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -597,8 +634,21 @@ export default function Home() {
     if (Math.abs(deltaX) < 60 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.25) return;
     swipeBlockedClick.current = true;
     window.setTimeout(() => { swipeBlockedClick.current = false; }, 400);
-    if (deltaX < 0) goToQuestion(questionIndex + 1);
-    else goToQuestion(questionIndex - 1);
+    if (deltaX < 0) animateSwipeTo(questionIndex + 1, "next");
+    else animateSwipeTo(questionIndex - 1, "previous");
+  }
+
+  function onPointerCancel(event: PointerEvent<HTMLElement>) {
+    touchStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function blockClickAfterSwipe(event: ReactMouseEvent<HTMLElement>) {
+    if (!swipeBlockedClick.current) return;
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   async function importExcel(event: ChangeEvent<HTMLInputElement>) {
@@ -679,6 +729,38 @@ export default function Home() {
     }
   }
 
+  const wrongListOverlay = wrongListOpen && wrongListBank && (
+    <div className="navigator-backdrop" role="presentation" onClick={() => setWrongListOpen(false)}>
+      <section className="question-navigator wrong-list-sheet" role="dialog" aria-modal="true" aria-label="错题清单" onClick={(event) => event.stopPropagation()}>
+        <div className="navigator-header">
+          <span>
+            <strong>错题清单</strong>
+            <small>{wrongListBank.name} · {wrongQuestions.length} 题</small>
+          </span>
+          <button onClick={() => setWrongListOpen(false)} aria-label="关闭错题清单">×</button>
+        </div>
+        {wrongQuestions.length > 0 ? (
+          <>
+            <div className="wrong-question-list">
+              {wrongQuestions.map((question) => {
+                const originalIndex = wrongListBank.questions.findIndex((item) => item.id === question.id) + 1;
+                return (
+                  <button key={question.id} onClick={() => startQuiz(true, question.id)} aria-label={`练习第 ${originalIndex} 题：${question.stem}`}>
+                    <span>第 {originalIndex} 题 · {typeLabel(question.type)}</span>
+                    <strong>{question.stem}</strong>
+                  </button>
+                );
+              })}
+            </div>
+            <button className="solid-action wrong-all-action" onClick={() => startQuiz(true)}>练习全部错题</button>
+          </>
+        ) : (
+          <p className="empty-wrong-list">当前题库还没有错题。</p>
+        )}
+      </section>
+    </div>
+  );
+
   if (!hydrated) {
     return (
       <main className="loading-screen" role="status">
@@ -695,7 +777,13 @@ export default function Home() {
     const allAnswered = sessionAnswered === session.length;
     const bankWrongCount = state.banks.find((bank) => bank.id === sessionBankId)?.wrongIds.length ?? 0;
     return (
-      <main className={`app-shell quiz-shell font-${state.settings.fontSize}`}>
+      <main
+        className={`app-shell quiz-shell font-${state.settings.fontSize}`}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onClickCapture={blockClickAfterSwipe}
+      >
         <header className="quiz-header">
           <button className="back-button" onClick={() => setScreen("home")} aria-label="退出本次练习">‹</button>
           <strong className="quiz-title">答题</strong>
@@ -707,7 +795,7 @@ export default function Home() {
           <div className="progress-fill" style={{ width: `${progress}%` }} />
         </div>
 
-        <section className="question-card" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
+        <section className={`question-card ${swipeAnimation ? `swipe-${swipeAnimation}` : ""}`}>
           <div className="question-meta">
             <span className="question-number">⚑ {questionIndex + 1} / {session.length}</span>
             <span className={`type-badge type-${current.type}`}>{typeLabel(current.type)}</span>
@@ -769,7 +857,9 @@ export default function Home() {
         </section>
 
         <div className="quiz-bottom-bar" aria-label="本次练习统计">
-          <span>☆ 错题 {bankWrongCount}</span>
+          <button className="wrong-list-button" onClick={() => setWrongListOpen(true)} disabled={bankWrongCount === 0} aria-label={`查看错题清单，共 ${bankWrongCount} 题`}>
+            ☆ 错题 {bankWrongCount}
+          </button>
           <span className="bottom-correct">● {sessionCorrect}</span>
           <span className="bottom-wrong">● {sessionWrong}</span>
           <button className="progress-button" onClick={() => setNavigatorOpen(true)} aria-label="打开题号导航">
@@ -808,6 +898,7 @@ export default function Home() {
             </section>
           </div>
         )}
+        {wrongListOverlay}
       </main>
     );
   }
@@ -857,8 +948,8 @@ export default function Home() {
             <small>道题</small>
           </div>
           <button className="solid-action" onClick={() => startQuiz(false)}>开始答题</button>
-          <button className="line-action" onClick={() => startQuiz(true)} disabled={activeBank.wrongIds.length === 0}>
-            错题重练（{activeBank.wrongIds.length}）
+          <button className="line-action" onClick={() => setWrongListOpen(true)} disabled={activeBank.wrongIds.length === 0}>
+            查看错题（{activeBank.wrongIds.length}）
           </button>
           <div className="simple-stats">
             <span>已答 <b>{activeBank.stats.answered}</b></span>
@@ -936,6 +1027,7 @@ export default function Home() {
         </section>
       )}
 
+      {wrongListOverlay}
       <p className="privacy-note">无账号 · 无云端 · 无数据上传</p>
     </main>
   );
