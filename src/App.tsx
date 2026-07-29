@@ -4,7 +4,7 @@ import { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent, useEffect, us
 import * as XLSX from "xlsx";
 
 type QuestionType = "single" | "multiple" | "judgment";
-type FontSize = "xsmall" | "small" | "medium" | "large";
+type FontSize = "xsmall" | "small" | "medium";
 type AnswerState = "correct" | "wrong";
 
 type Option = {
@@ -201,7 +201,7 @@ async function saveState(state: PersistedState): Promise<void> {
 }
 
 function validSettings(value: Partial<Settings> | undefined): Settings {
-  const fontSizes: FontSize[] = ["xsmall", "small", "medium", "large"];
+  const fontSizes: FontSize[] = ["xsmall", "small", "medium"];
   return {
     ...DEFAULT_SETTINGS,
     ...value,
@@ -490,7 +490,7 @@ export default function Home() {
   }
 
   function cycleFontSize() {
-    const order: FontSize[] = ["xsmall", "small", "medium", "large"];
+    const order: FontSize[] = ["xsmall", "small", "medium"];
     const currentIndex = order.indexOf(state.settings.fontSize);
     patchSettings({ fontSize: order[(currentIndex + 1) % order.length] });
   }
@@ -772,7 +772,7 @@ export default function Home() {
 
   if (screen === "quiz" && current) {
     const progress = session.length ? (sessionAnswered / session.length) * 100 : 0;
-    const fontLabel: Record<FontSize, string> = { xsmall: "更小", small: "小", medium: "中", large: "大" };
+    const fontLabel: Record<FontSize, string> = { xsmall: "小", small: "中", medium: "大" };
     const sessionWrong = sessionAnswered - sessionCorrect;
     const allAnswered = sessionAnswered === session.length;
     const bankWrongCount = state.banks.find((bank) => bank.id === sessionBankId)?.wrongIds.length ?? 0;
@@ -1016,10 +1016,10 @@ export default function Home() {
           )}
           <div className="font-setting">
             <span><strong>答题字体</strong><small>题目、选项和行距同步调整</small></span>
-            <div className="font-options font-options-four" role="group" aria-label="字体大小">
-              {(["xsmall", "small", "medium", "large"] as const).map((size) => (
+            <div className="font-options" role="group" aria-label="字体大小">
+              {(["xsmall", "small", "medium"] as const).map((size) => (
                 <button key={size} className={state.settings.fontSize === size ? "active" : ""} onClick={() => patchSettings({ fontSize: size })}>
-                  {({ xsmall: "更小", small: "小", medium: "中", large: "大" } as const)[size]}
+                  {({ xsmall: "小", small: "中", medium: "大" } as const)[size]}
                 </button>
               ))}
             </div>

@@ -28,7 +28,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(52, 140, 233
 .font-xsmall { --question-size: 16px; --option-size: 14px; --question-line: 1.35; }
 .font-small { --question-size: 18px; --option-size: 16px; --question-line: 1.4; }
 .font-medium { --question-size: 21px; --option-size: 18px; --question-line: 1.46; }
-.font-large { --question-size: 26px; --option-size: 22px; --question-line: 1.54; }
 
 .app-shell {
   width: min(100%, 760px);
@@ -188,7 +187,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(52, 140, 233
 .font-options button { height: 36px; border: 0; border-right: 1px solid #bbb; background: #fff; cursor: pointer; }
 .font-options button:last-child { border-right: 0; }
 .font-options button.active { color: #fff; background: #222; }
-.font-options-four { grid-template-columns: repeat(4, 42px); }
 .delay-options { grid-template-columns: repeat(2, 50px); }
 
 .privacy-note { margin-top: 42px; color: #aaa; font-size: 12px; text-align: center; }
